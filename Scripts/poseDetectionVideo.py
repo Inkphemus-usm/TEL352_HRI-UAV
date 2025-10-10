@@ -14,6 +14,7 @@ from time import time, sleep
 import mediapipe as mp  
 import matplotlib.pyplot as plt
 from poseDetectionFunction import detectPose
+from pathlib import Path
 
 
 
@@ -53,15 +54,18 @@ def try_open_camera(indices=(0,), backends=(cv2.CAP_V4L2, cv2.CAP_ANY)):
     return None, None, None
 
 # Try to open the camera. On WSL use V4L2 explicitly first, then fallback.
+# Resolve sample path: allow explicit override with SAMPLE_PATH env var
+sample_path = str(Path(__file__).resolve().parent.parent.joinpath('media', 'videoSample.mp4'))
+
 video, used_index, used_backend = try_open_camera(indices=(0,1,2), backends=(cv2.CAP_V4L2, cv2.CAP_ANY))
 if video is None or not video.isOpened():
     logger.warning('Camera device could not be opened with tried backends/indices. Trying sample file fallback...')
     # fallback to a sample file if camera is not available
-    video = cv2.VideoCapture('videoSample.mp4')
+    video = cv2.VideoCapture(sample_path)
     if video is None or not video.isOpened():
-        logger.error('Fallback videoSample.mp4 could not be opened. Aborting.')
+        logger.error('Fallback %s could not be opened. Aborting.', sample_path)
     else:
-        logger.info('Opened videoSample.mp4 as fallback source')
+        logger.info('Opened %s as fallback source', sample_path)
 else:
     logger.info('VideoCapture opened successfully (index=%s, backend=%s)', used_index, used_backend)
 
@@ -86,11 +90,11 @@ if video is not None and video.isOpened():
         if used_index is not None:
             logger.warning('Camera opened but no frames received. Switching to sample video for debugging.')
             video.release()
-            video = cv2.VideoCapture('videoSample.mp4')
+            video = cv2.VideoCapture(sample_path)
             if video is None or not video.isOpened():
-                logger.error('Could not open fallback sample video either.')
+                logger.error('Could not open fallback sample video either: %s', sample_path)
             else:
-                logger.info('Opened videoSample.mp4 as fallback source')
+                logger.info('Opened %s as fallback source', sample_path)
 
 # If Qt is forced to 'offscreen', don't call cv2.imshow (it will fail). Instead
 # write processed frames to an output video file so the script can run headless.

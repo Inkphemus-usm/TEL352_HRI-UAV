@@ -1,10 +1,11 @@
 import math
+import os
 import cv2
 import numpy as np
 from time import time
 import mediapipe as mp  
 import matplotlib.pyplot as plt
-
+from pathlib import Path
 
 
 mp_pose = mp.solutions.pose #Clase
@@ -44,7 +45,3 @@ def detectPose(image, pose, display=True):
     else:
         return output_image, landmarks
     
-
-    ### Example usage ###
-sample_image = cv2.imread('sample.jpg')
-detectPose(sample_image, pose, display=True)
