@@ -1,0 +1,31 @@
+# Ignore Media and generated outputs
+media/
+*.mp4
+*.avi
+
+# Ignore Python cache
+__pycache__/
+*.py[cod]
+
+# Ignore environment folders
+env/
+venv/
+\.venv/
+
+# Ignore logs and runtime files
+*.log
+run.log
+
+# Ignore editor configs
+.vscode/
+*.swp
+
+# Ignore model/tasks files that should not be committed
+pose_landmarker.task
+Scripts/pose_landmarker.task
+
+# If you need to ignore specific OS files
+# Windows thumbnail cache
+Thumbs.db
+# macOS
+.DS_Store
