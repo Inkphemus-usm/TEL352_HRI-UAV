@@ -16,7 +16,7 @@ pose = mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.3, model_
 mp_drawing = mp.solutions.drawing_utils
 
 
-sample_path = Path(__file__).resolve().parent.parent.joinpath('media', 'sample.jpg')
+sample_path = Path(__file__).resolve().parent.parent.joinpath('media', 'sample3.jpg')
 sample_path = sample_path.resolve()
 if not sample_path.exists():
 	print(f"Sample image not found at {sample_path}")
