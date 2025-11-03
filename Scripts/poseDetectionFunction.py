@@ -28,20 +28,59 @@ def detectPose(image, pose, display=True):
     height, width, _ = image.shape 
     landmarks = []
 
+    # Define which landmark indices to keep: arms and torso
+    # MediaPipe Pose indices: shoulders(11,12), elbows(13,14), wrists(15,16), hips(23,24)
+    selected_indices = [11,12,13,14,15,16,17,18,19,20,23,24]
+
     #Check if any landmarks are detected
     if results.pose_landmarks:
-        #Draw Pose landmarks on the output image
-        mp_drawing.draw_landmarks(image = output_image,landmark_list = results.pose_landmarks, connections =  mp_pose.POSE_CONNECTIONS)
-        
-        for landmark in results.pose_landmarks.landmark:
-            landmarks.append((int(landmark.x * width), int(landmark.y * height), (landmark.z * width)))
+        # Build a list of selected landmarks (pixel coordinates)
+        lm_list = results.pose_landmarks.landmark
+        for idx in selected_indices:
+            if idx < len(lm_list):
+                lm = lm_list[idx]
+                x_px = int(lm.x * width)
+                y_px = int(lm.y * height)
+                z_val = lm.z * width
+                landmarks.append((x_px, y_px, z_val))
 
-    #Display the output image
+        # Draw simplified skeleton (only arms and torso)
+        # Left arm: 11->13->15 ; Right arm: 12->14->16
+        # Torso connections: 11->12 (shoulders), 11->23 (left shoulder to left hip), 12->24 (right shoulder to right hip), 23->24 (hips)
+        def safe_point(i):
+            # return tuple or None
+            try:
+                return landmarks[selected_indices.index(i)]
+            except ValueError:
+                return None
+
+        # draw circles for each selected landmark
+        for (x_px, y_px, _) in landmarks:
+            cv2.circle(output_image, (x_px, y_px), 5, (0, 255, 0), -1)
+
+        # helper to draw line between two landmark indices if both present
+        def draw_conn(a, b, color=(0,200,0), thickness=2):
+            pa = safe_point(a)
+            pb = safe_point(b)
+            if pa is not None and pb is not None:
+                cv2.line(output_image, (pa[0], pa[1]), (pb[0], pb[1]), color, thickness)
+
+        # arms
+        draw_conn(11,13)
+        draw_conn(13,15)
+        draw_conn(12,14)
+        draw_conn(14,16)
+        # torso
+        draw_conn(11,12, color=(255,0,0), thickness=3)
+        draw_conn(11,23, color=(255,0,0), thickness=3)
+        draw_conn(12,24, color=(255,0,0), thickness=3)
+        draw_conn(23,24, color=(255,0,0), thickness=3)
+
+    #Display the output image (show only original and simplified output)
     if display:
         plt.figure(figsize=[10,10])
         plt.subplot(121);plt.imshow(image[:,:,::-1]); plt.title("Original Image"); plt.axis('off')
-        plt.subplot(122);plt.imshow(output_image[:,:,::-1]); plt.title("Original Image"); plt.axis('off')
-        mp_drawing.plot_landmarks(results.pose_world_landmarks, mp_pose.POSE_CONNECTIONS)
+        plt.subplot(122);plt.imshow(output_image[:,:,::-1]); plt.title("Simplified Landmarks"); plt.axis('off')
     else:
         return output_image, landmarks
     

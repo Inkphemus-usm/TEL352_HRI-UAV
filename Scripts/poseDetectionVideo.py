@@ -15,6 +15,21 @@ import mediapipe as mp
 import matplotlib.pyplot as plt
 from poseDetectionFunction import detectPose
 from pathlib import Path
+# Optional OpenVINO support: set USE_OPENVINO=1 and OPENVINO_MODEL_PATH to the model
+use_openvino = os.environ.get('USE_OPENVINO', '0') == '1'
+openvino_model_path = os.environ.get('OPENVINO_MODEL_PATH', '').strip()
+openvino_wrapper = None
+if use_openvino and openvino_model_path:
+    try:
+        from openvino_inference import OpenVINOPose
+        openvino_wrapper = OpenVINOPose(openvino_model_path)
+        logger = logging.getLogger(__name__)
+        logger.info('OpenVINO wrapper initialized (model=%s)', openvino_model_path)
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning('OpenVINO initialization failed: %s. Falling back to MediaPipe.', e)
+        openvino_wrapper = None
+        use_openvino = False
 
 
 
@@ -127,11 +142,14 @@ try:
         frame = cv2.resize(frame, (int(fw * (640/fh)), 640))
 
         try:
-            logger.debug('About to call detectPose() for frame %d', frame_count)
-            processed_frame, landmarks = detectPose(frame, pose_video, display=False)
-            logger.debug('detectPose() returned for frame %d (landmarks=%d)', frame_count, len(landmarks))
+            logger.debug('About to run inference for frame %d (openvino=%s)', frame_count, use_openvino)
+            if use_openvino and openvino_wrapper is not None:
+                processed_frame, landmarks = openvino_wrapper.infer_and_draw(frame)
+            else:
+                processed_frame, landmarks = detectPose(frame, pose_video, display=False)
+            logger.debug('Inference returned for frame %d (landmarks=%d)', frame_count, len(landmarks))
         except Exception as e:
-            # Catch errors coming from mediapipe or drawing
+            # Catch errors coming from mediapipe/openvino or drawing
             logger.error('Error during pose detection on frame %d: %s', frame_count, e)
             logger.debug(traceback.format_exc())
             break
