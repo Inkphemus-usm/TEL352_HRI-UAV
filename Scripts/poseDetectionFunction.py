@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from time import time
 import mediapipe as mp  
+import matplotlib
 import matplotlib.pyplot as plt
 from pathlib import Path
 
@@ -81,13 +82,24 @@ def detectPose(image, pose, display=True):
         plt.figure(figsize=[10,10])
         plt.subplot(121);plt.imshow(image[:,:,::-1]); plt.title("Original Image"); plt.axis('off')
         plt.subplot(122);plt.imshow(output_image[:,:,::-1]); plt.title("Simplified Landmarks"); plt.axis('off')
-        # If an X/Wayland display is available, show interactively; otherwise save to media/
+        # If an X/Wayland display is available, try to show interactively; otherwise save to media/
+        out_path = Path(__file__).resolve().parent.joinpath('..', 'media', 'output_sample.png').resolve()
         if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
-            plt.show()
+            backend = matplotlib.get_backend()
+            # If backend is non-interactive (Agg) we cannot show; save instead
+            if 'agg' in backend.lower():
+                # attempt to show may not work; save to file instead
+                cv2.imwrite(str(out_path), output_image)
+                print(f"Non-interactive matplotlib backend ('{backend}'). Wrote output image to: {out_path}")
+            else:
+                try:
+                    plt.show()
+                except Exception:
+                    # fallback to saving
+                    cv2.imwrite(str(out_path), output_image)
+                    print(f"plt.show() failed. Wrote output image to: {out_path}")
         else:
             # Save the output image so the user can inspect it when running headless
-            out_path = Path(__file__).resolve().parent.joinpath('..', 'media', 'output_sample.png').resolve()
-            # cv2.imwrite expects BGR image; output_image is BGR
             cv2.imwrite(str(out_path), output_image)
             print(f"No graphical display detected. Wrote output image with simplified landmarks to: {out_path}")
     else:
