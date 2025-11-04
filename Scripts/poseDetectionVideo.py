@@ -15,6 +15,13 @@ import mediapipe as mp
 import matplotlib.pyplot as plt
 from poseDetectionFunction import detectPose
 from pathlib import Path
+
+# Configure logging early so we always get console feedback
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s: %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)])
+logger = logging.getLogger(__name__)
 # Optional OpenVINO support: set USE_OPENVINO=1 and OPENVINO_MODEL_PATH to the model
 use_openvino = os.environ.get('USE_OPENVINO', '0') == '1'
 openvino_model_path = os.environ.get('OPENVINO_MODEL_PATH', '').strip()
@@ -23,10 +30,8 @@ if use_openvino and openvino_model_path:
     try:
         from openvino_inference import OpenVINOPose
         openvino_wrapper = OpenVINOPose(openvino_model_path)
-        logger = logging.getLogger(__name__)
         logger.info('OpenVINO wrapper initialized (model=%s)', openvino_model_path)
     except Exception as e:
-        logger = logging.getLogger(__name__)
         logger.warning('OpenVINO initialization failed: %s. Falling back to MediaPipe.', e)
         openvino_wrapper = None
         use_openvino = False
@@ -41,15 +46,7 @@ mp_pose = mp.solutions.pose #Clase
 mp_drawing = mp.solutions.drawing_utils
 
 pose_video= mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.5, model_complexity=1)
-# Log that the Mediapipe pose model has been created
-print('Pose model initialized')
-
-# Configure logging so we can see progress and errors in the console (and optionally a file)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(levelname)s: %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)])
-logger = logging.getLogger(__name__)
+logger.info('MediaPipe Pose model initialized')
 
 def try_open_camera(indices=(0,), backends=(cv2.CAP_V4L2, cv2.CAP_ANY)):
     """Try opening a camera using different backends and indices.
@@ -84,6 +81,9 @@ if video is None or not video.isOpened():
 else:
     logger.info('VideoCapture opened successfully (index=%s, backend=%s)', used_index, used_backend)
 
+# Log startup summary so the user sees what will run
+logger.info('Starting pose detection script. use_openvino=%s, openvino_model=%s, sample_path=%s',
+            use_openvino, openvino_model_path or '<none>', sample_path)
 # If camera opened but reads timeout (common on WSL), try a short warm-up read loop
 def warmup_capture(cap, timeout_s=8.0, poll_interval=0.2):
     start = time()
@@ -170,6 +170,7 @@ try:
                 h, w = processed_frame.shape[:2]
                 writer = cv2.VideoWriter(output_path, fourcc, out_fps, (w, h))
                 logger.info('Initialized writer -> %s (fps=%s, size=%sx%s)', output_path, out_fps, w, h)
+                logger.info('Running headless: frames will be written to %s (no GUI will be shown)', output_path)
             else:
                 logger.debug('Writer already initialized')
             writer.write(processed_frame)

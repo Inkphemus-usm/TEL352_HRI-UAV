@@ -17,6 +17,7 @@ import glob
 import os.path as osp
 import cv2
 import numpy as np
+import logging
 
 # (opcional) silenciar logs ruidosos de TFLite/absl
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
@@ -34,6 +35,31 @@ MAX_MISSES     = 5                     # lecturas fallidas consecutivas antes de
 mp_pose   = mp.solutions.pose
 mp_draw   = mp.solutions.drawing_utils
 mp_styles = mp.solutions.drawing_styles
+
+# Configure logging for console feedback
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s: %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)])
+logger = logging.getLogger(__name__)
+
+# Warn if USE_OPENVINO is set: this script uses MediaPipe only by default
+if os.environ.get('USE_OPENVINO', '0') == '1':
+    logger.warning('USE_OPENVINO=1 is set but %s uses MediaPipe only. To use OpenVINO, run Scripts/poseDetectionVideo.py or adapt this script.', __file__)
+
+# Optional OpenVINO support: attempt to initialize wrapper if requested
+use_openvino = os.environ.get('USE_OPENVINO', '0') == '1'
+openvino_model_path = os.environ.get('OPENVINO_MODEL_PATH', '').strip()
+openvino_wrapper = None
+if use_openvino and openvino_model_path:
+    try:
+        from openvino_inference import OpenVINOPose
+        openvino_wrapper = OpenVINOPose(openvino_model_path)
+        logger.info('OpenVINO wrapper initialized (model=%s)', openvino_model_path)
+    except Exception as e:
+        logger.warning('OpenVINO initialization failed: %s. Falling back to MediaPipe.', e)
+        openvino_wrapper = None
+        use_openvino = False
 
 
 def list_video_indices_linux():
@@ -165,19 +191,24 @@ def main():
     # --- abrir fuente ---
     cap, desc = open_source()
     if not cap:
-        print("[ERROR] No se pudo abrir cámara ni archivo. Revisa /dev/video*, permisos y/o ruta del video.")
+        logger.error('No se pudo abrir cámara ni archivo. Revisa /dev/video*, permisos y/o ruta del video.')
+        logger.info('Sugerencia: en WSL asegúrate de haber habilitado el device passthrough y que /dev/video* exista. Alternativamente, usa un archivo de video como respaldo en FALLBACK_VIDEO.')
         sys.exit(1)
-    print(f"[INFO] Fuente abierta: {desc}")
+    logger.info('Fuente abierta: %s', desc)
 
-    # --- inicializar pose ---
-    pose = mp_pose.Pose(
-        static_image_mode=False,
-        model_complexity=1,             # 0/1/2 (2=heavy)
-        enable_segmentation=False,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
-    )
-    print("Pose model initialized")
+    # --- inicializar pose (MediaPipe) o usar OpenVINO wrapper si está disponible ---
+    pose = None
+    if use_openvino and openvino_wrapper is not None:
+        logger.info('Using OpenVINO for inference (model=%s). MediaPipe will not be initialized.', openvino_model_path)
+    else:
+        pose = mp_pose.Pose(
+            static_image_mode=False,
+            model_complexity=1,             # 0/1/2 (2=heavy)
+            enable_segmentation=False,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        logger.info('MediaPipe Pose model initialized')
 
     last_t = time.time()
     miss   = 0
@@ -191,7 +222,7 @@ def main():
         if not ok:
             miss += 1
             if miss >= MAX_MISSES:
-                print("[INFO] Fin de la fuente o timeout prolongado.")
+                logger.info('Fin de la fuente o timeout prolongado.')
                 break
             # pequeña espera antes de reintentar (cámara lenta en WSL)
             time.sleep(0.05)
@@ -204,20 +235,40 @@ def main():
         # Redimensiona para mostrar
         frame_bgr = resize_keep_aspect(frame_bgr, TARGET_HEIGHT)
 
-        # MediaPipe usa RGB
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-
-        # Inferencia
-        results = pose.process(frame_rgb)
-
-        # Dibujo de landmarks
-        if results.pose_landmarks:
-            mp_draw.draw_landmarks(
-                frame_bgr,
-                results.pose_landmarks,
-                mp_pose.POSE_CONNECTIONS,
-                landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style()
-            )
+        # Inferencia: OpenVINO wrapper (if presente) o MediaPipe
+        try:
+            if use_openvino and openvino_wrapper is not None:
+                processed_frame, landmarks = openvino_wrapper.infer_and_draw(frame_bgr)
+                # processed_frame is the frame with landmarks drawn (OpenVINO wrapper handles drawing)
+                frame_bgr = processed_frame
+            else:
+                # MediaPipe path
+                # MediaPipe usa RGB
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                results = pose.process(frame_rgb)
+                # Dibujo de landmarks
+                if results.pose_landmarks:
+                    mp_draw.draw_landmarks(
+                        frame_bgr,
+                        results.pose_landmarks,
+                        mp_pose.POSE_CONNECTIONS,
+                        landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style()
+                    )
+        except Exception:
+            logger.exception('Error during inference/drawing. Falling back if possible.')
+            # If OpenVINO failed mid-run, try to fallback to MediaPipe (if available)
+            if openvino_wrapper is not None and pose is None:
+                try:
+                    pose = mp_pose.Pose(
+                        static_image_mode=False,
+                        model_complexity=1,
+                        enable_segmentation=False,
+                        min_detection_confidence=0.5,
+                        min_tracking_confidence=0.5
+                    )
+                    logger.info('Fallback: MediaPipe Pose model initialized after OpenVINO failure')
+                except Exception:
+                    logger.exception('Failed to initialize MediaPipe during fallback.')
 
         # FPS
         now = time.time()
@@ -235,16 +286,24 @@ def main():
             break
         elif k == ord('s'):         # guardar frame
             out = osp.join("frames", f"frame_{saved_count:04d}.jpg")
-            cv2.imwrite(out, frame_bgr)
-            print(f"[INFO] Guardado: {out}")
-            saved_count += 1
+            try:
+                cv2.imwrite(out, frame_bgr)
+                logger.info('Guardado: %s', out)
+                saved_count += 1
+            except Exception:
+                logger.exception('Error al guardar frame en %s', out)
         elif k == ord('f'):         # fullscreen toggle
             toggle_fullscreen(WINDOW_NAME)
 
     # Limpieza
     cap.release()
-    pose.close()
+    if pose is not None:
+        try:
+            pose.close()
+        except Exception:
+            logger.exception('Error closing MediaPipe pose object')
     cv2.destroyAllWindows()
+    logger.info('Webcam script finished. Frames saved to ./frames if any were captured.')
 
 
 if __name__ == "__main__":
