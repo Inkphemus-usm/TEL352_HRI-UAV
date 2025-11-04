@@ -81,6 +81,15 @@ def detectPose(image, pose, display=True):
         plt.figure(figsize=[10,10])
         plt.subplot(121);plt.imshow(image[:,:,::-1]); plt.title("Original Image"); plt.axis('off')
         plt.subplot(122);plt.imshow(output_image[:,:,::-1]); plt.title("Simplified Landmarks"); plt.axis('off')
+        # If an X/Wayland display is available, show interactively; otherwise save to media/
+        if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
+            plt.show()
+        else:
+            # Save the output image so the user can inspect it when running headless
+            out_path = Path(__file__).resolve().parent.joinpath('..', 'media', 'output_sample.png').resolve()
+            # cv2.imwrite expects BGR image; output_image is BGR
+            cv2.imwrite(str(out_path), output_image)
+            print(f"No graphical display detected. Wrote output image with simplified landmarks to: {out_path}")
     else:
         return output_image, landmarks
     
