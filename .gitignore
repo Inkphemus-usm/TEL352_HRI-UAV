@@ -32,3 +32,7 @@ Thumbs.db
 
 data/*
 media/
+arduino-nano-33-ble-sense/arduino-nano-33-ble-sense.ino.bin
+arduino-nano-33-ble-sense/flash_linux.sh
+arduino-nano-33-ble-sense/flash_windows.bat
+arduino-nano-33-ble-sense/flash_mac.command
