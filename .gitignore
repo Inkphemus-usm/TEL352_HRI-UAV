@@ -29,3 +29,6 @@ Scripts/pose_landmarker.task
 Thumbs.db
 # macOS
 .DS_Store
+
+data/*
+media/

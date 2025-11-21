@@ -60,10 +60,10 @@ def standardize_keypoints(pose_landmarks):
     return np.array(normalized_coords, dtype=np.float32)
 
 try:
-    model = load_model('pose_classifier_model.h5')
+    model = load_model('pose_classifier_model2.h5')
     print("✅ Modelo Keras cargado exitosamente.")
     
-    label_encoder = joblib.load('label_encoder.pkl')
+    label_encoder = joblib.load('label_encoder2.pkl')
     class_names = list(label_encoder.classes_)
     print(f"✅ LabelEncoder cargado. Clases: {class_names}")
 

@@ -6,8 +6,8 @@ import os
 mp_drawing = mp.solutions.drawing_utils
 mp_pose = mp.solutions.pose
 
-DATASET_BASE_DIR = "../../data"
-OUTPUT_FILENAME = "dataset.npz"
+DATASET_BASE_DIR = "../data" # Ruta donde están las carpetas (clases)
+OUTPUT_FILENAME = "dataset2.npz"
 
 LANDMARK_INDICES = {
     'l_shoulder': 11, 'r_shoulder': 12, # r_shoulder es el origen (0,0)
@@ -25,8 +25,18 @@ POINTS_OF_INTEREST = [
 
 FEATURE_VECTOR_SIZE = len(POINTS_OF_INTEREST) * 2
 
+# 💡 Mapeo de Clases: Define cómo se agrupan las carpetas/etiquetas.
+# Usamos el nombre de la carpeta/clase como llave y la etiqueta final como valor.
+LABEL_MAPPING = {
+    'atras2': 'atras',  # Fusionar 'atras2' con 'atras'
+    'trans1': 'trans',  # Fusionar 'trans1' con 'trans'
+    'trans2': 'trans',  # Fusionar 'trans2' con 'trans'
+    # Agrega cualquier otra clase que necesite fusión aquí (ej: 'delante_rapido' -> 'delante')
+}
+
+
 def standardize_keypoints(pose_landmarks):
-    """Normaliza y estandariza los keypoints centrándolos en el Hombro Derecho."""
+    """Normaliza y estandariza los keypoints centrándolos en el Hombro Derecho (SIN CAMBIOS)."""
     if not pose_landmarks:
         return None
 
@@ -57,7 +67,8 @@ def standardize_keypoints(pose_landmarks):
 
 def create_consolidated_dataset(base_dir):
     """
-    Recorre subcarpetas de clases, extrae keypoints de imágenes y consolida el dataset.
+    Recorre subcarpetas de clases, extrae keypoints de imágenes, aplica mapeo
+    de clases y consolida el dataset.
     """
     all_X = [] # feats
     all_Y = [] # tags
@@ -73,20 +84,23 @@ def create_consolidated_dataset(base_dir):
             
             if not os.path.isdir(class_path):
                 continue
+            
+            # 💡 Aplicar Mapeo: Obtener la etiqueta final
+            final_tag = LABEL_MAPPING.get(class_name, class_name) 
 
-            print(f"\nProcesando clase: '{class_name}'...")
+            print(f"\nProcesando clase: '{class_name}' -> Etiqueta final: '{final_tag}'...")
+            
+            # Reiniciar el conteo de muestras añadidas para esta clase
+            initial_count = len(all_X)
             
             for filename in os.listdir(class_path):
                 if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                     image_path = os.path.join(class_path, filename)
                     
-                    # Leer la imagen
                     image = cv2.imread(image_path)
                     if image is None:
-                        print(f"  Error al cargar imagen: {filename}")
                         continue
                     
-                    #  Blazepose
                     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                     image_rgb.flags.writeable = False
                     results = pose.process(image_rgb)
@@ -96,13 +110,14 @@ def create_consolidated_dataset(base_dir):
                         
                         if normalized_vector is not None and normalized_vector.shape[0] == FEATURE_VECTOR_SIZE:
                             all_X.append(normalized_vector)
-                            all_Y.append(class_name)
+                            # Usar la etiqueta mapeada/final
+                            all_Y.append(final_tag)
                             total_images_processed += 1
                         
-            print(f"  -> {len(all_X) - len(all_Y)} muestras añadidas para '{class_name}'.")
+            print(f"  -> {len(all_X) - initial_count} muestras añadidas para '{final_tag}'.")
 
     if not all_X:
-        print("\nERROR")
+        print("\n❌ ERROR: No se extrajo ningún keypoint válido. Revise las imágenes y la ruta.")
         return
 
     X_data = np.array(all_X)
@@ -114,8 +129,7 @@ def create_consolidated_dataset(base_dir):
     print(f"✅ CONSOLIDACIÓN COMPLETA.")
     print(f"Total de muestras válidas (frames/imágenes): {total_images_processed}")
     print(f"Dataset guardado en: {OUTPUT_FILENAME}")
-    print(f"Forma de X (features): {X_data.shape}")
-    print(f"Forma de Y (etiquetas): {Y_data.shape}")
+    print(f"Clases únicas en el dataset: {np.unique(Y_data)}")
     print("="*50)
 
 
@@ -123,6 +137,6 @@ def create_consolidated_dataset(base_dir):
 
 if __name__ == "__main__":
     if not os.path.exists(DATASET_BASE_DIR):
-        print(f"ERROR: El directorio base '{DATASET_BASE_DIR}' no existe. Por favor, créelo y coloque las carpetas de clase dentro.")
+        print(f"❌ ERROR: El directorio base '{DATASET_BASE_DIR}' no existe.")
     else:
         create_consolidated_dataset(DATASET_BASE_DIR)
