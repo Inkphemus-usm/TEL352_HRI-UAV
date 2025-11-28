@@ -2,7 +2,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import joblib
-from tensorflow.keras.models import load_model
+# Importación corregida y esencial para TFLite
+from tensorflow.lite.python.interpreter import Interpreter 
 import time 
 import math
 import os
@@ -10,31 +11,27 @@ import os
 # --- 1. CONFIGURACIÓN DEL SISTEMA ---
 
 FEATURE_VECTOR_SIZE = 16 
-COLOR_TOLERANCE = 30.0  # Tolerancia máxima para autenticación por color.
-DEBOUNCE_TIME = 1.0     # Tiempo mínimo entre transiciones de armado/desarmado.
-MOVEMENT_SPEED = 0.5    # Velocidad de movimiento del dron (m/s).
+COLOR_TOLERANCE = 30.0  
+DEBOUNCE_TIME = 1.0     
+MOVEMENT_SPEED = 0.5    
 
 # Mapeo de comandos de clase a vectores de velocidad [X, Y, Z]
-# X: Adelante/Atrás, Y: Izquierda/Derecha, Z: Arriba/Abajo (convención típica Z positivo es hacia abajo)
 COMMAND_MAP = {
-    'delante': [MOVEMENT_SPEED, 0, 0],   # Adelante
-    'atras':   [-MOVEMENT_SPEED, 0, 0],  # Atrás
-    'derecha': [0, MOVEMENT_SPEED, 0],   # Derecha
-    'izquierda': [0, -MOVEMENT_SPEED, 0],# Izquierda
-    'arriba':  [0, 0, -MOVEMENT_SPEED],  # Arriba
-    'abajo':   [0, 0, MOVEMENT_SPEED],   # Abajo
-    'trans':   [0, 0, 0],                # Detener/Transición
-    'idle':    [0, 0, 0],                # Detener/Idle
+    'delante': [MOVEMENT_SPEED, 0, 0], 
+    'atras':   [-MOVEMENT_SPEED, 0, 0], 
+    'derecha': [0, MOVEMENT_SPEED, 0],   
+    'izquierda': [0, -MOVEMENT_SPEED, 0],
+    'arriba':  [0, 0, -MOVEMENT_SPEED], 
+    'abajo':   [0, 0, MOVEMENT_SPEED],   
+    'trans':   [0, 0, 0],                
+    'idle':    [0, 0, 0],                
 }
 
-# Dedo Índice Derecho (20) para muestrear la palma/mano
 PALM_LANDMARK_INDEX = 20 
 
 LANDMARK_INDICES = {
-    'l_shoulder': 11, 'r_shoulder': 12, 
-    'r_elbow': 14, 'l_elbow': 13,
-    'r_wrist': 16, 'l_wrist': 15,
-    'r_hip': 24, 'l_hip': 23,
+    'l_shoulder': 11, 'r_shoulder': 12, 'r_elbow': 14, 'l_elbow': 13,
+    'r_wrist': 16, 'l_wrist': 15, 'r_hip': 24, 'l_hip': 23,
     'r_index': PALM_LANDMARK_INDEX 
 }
 POINTS_OF_INTEREST = [
@@ -89,7 +86,6 @@ def get_hand_color(image, pose_landmarks, landmark_index):
     h, w, _ = image.shape
     px, py = int(point.x * w), int(point.y * h)
     
-    # Definir el área de muestreo (5x5 pixeles)
     sample_size = 5 
     y1, y2 = max(0, py - sample_size), min(h, py + sample_size)
     x1, x2 = max(0, px - sample_size), min(w, px + sample_size)
@@ -97,7 +93,6 @@ def get_hand_color(image, pose_landmarks, landmark_index):
     region = image[y1:y2, x1:x2]
     if region.size == 0: return None
     
-    # Calcular promedio BGR y convertir a RGB
     avg_color_bgr = np.mean(region, axis=(0, 1))
     avg_color_rgb = avg_color_bgr[::-1]
     return avg_color_rgb.astype(np.float32)
@@ -108,18 +103,32 @@ def color_distance(rgb1, rgb2):
         (rgb1[0] - rgb2[0])**2 + (rgb1[1] - rgb2[1])**2 + (rgb1[2] - rgb2[2])**2
     )
 
-# --- 4. CARGA DE MODELO ---
+# --- 4. CARGA DE MODELO (CORREGIDO) ---
+
+TFLITE_MODEL_PATH = 'pose_classifier_lite.tflite' # Asume este nombre para tu modelo .tflite
 
 try:
-    model = load_model('pose_classifier_model2.h5')
+    # 1. Cargar el LabelEncoder (necesario para mapear el índice de salida a nombre de clase)
     label_encoder = joblib.load('label_encoder2.pkl')
     class_names = list(label_encoder.classes_)
-    print("✅ Modelos Keras/Encoder cargados exitosamente.")
+    
+    # 2. Cargar el Intérprete TFLite (CLAVE)
+    interpreter = Interpreter(model_path=TFLITE_MODEL_PATH)
+    interpreter.allocate_tensors()
+    
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+
+    # Validación
+    if input_details[0]['shape'][1] != FEATURE_VECTOR_SIZE:
+        raise ValueError("El modelo TFLite espera un tamaño de entrada diferente al configurado.")
+    
+    print("✅ Intérprete TFLite y Encoder cargados exitosamente.")
 except Exception as e:
     print(f"❌ ERROR al cargar el modelo o el encoder: {e}")
     exit()
 
-# --- 5. BUCLE DE INFERENCIA HEADLESS ---
+# --- 5. BUCLE DE INFERENCIA HEADLESS (CORREGIDO) ---
 
 def run_headless_inference():
     mp_pose = mp.solutions.pose
@@ -157,8 +166,6 @@ def run_headless_inference():
             
             if results.pose_landmarks:
                 normalized_vector = standardize_keypoints(results.pose_landmarks)
-                
-                # Obtener color de la palma
                 current_color_rgb = get_hand_color(
                     image, results.pose_landmarks, LANDMARK_INDICES['r_index']
                 ) 
@@ -166,11 +173,26 @@ def run_headless_inference():
                 # Clasificación de Pose
                 if normalized_vector is not None and normalized_vector.shape[0] == FEATURE_VECTOR_SIZE:
                     
-                    X_input = normalized_vector.reshape(1, FEATURE_VECTOR_SIZE) 
-                    prediction_probs = model.predict(X_input, verbose=0)[0]
+                    # Preparar la entrada TFLite: [1, 16] float32
+                    X_input = normalized_vector.reshape(1, FEATURE_VECTOR_SIZE).astype(np.float32)
+                    
+                    # --- INFERENCIA TFLITE (El cambio clave) ---
+                    
+                    # 1. Asignar el tensor de entrada
+                    interpreter.set_tensor(input_details[0]['index'], X_input)
+                    
+                    # 2. Invocar la inferencia
+                    interpreter.invoke()
+                    
+                    # 3. Obtener el tensor de salida (Probabilidades)
+                    output_data = interpreter.get_tensor(output_details[0]['index'])
+                    
+                    prediction_probs = output_data[0] # El array de probabilidades
+                    
                     predicted_index = np.argmax(prediction_probs)
                     predicted_confidence = prediction_probs[predicted_index]
                     
+                    # Obtener la clase solo si la confianza es alta
                     if predicted_confidence > confidence_threshold:
                         predicted_class = label_encoder.inverse_transform([predicted_index])[0]
                     
