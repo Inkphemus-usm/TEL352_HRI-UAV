@@ -45,24 +45,26 @@ def arm_disarm_drone(should_arm: bool):
     """Simula el envío del comando de armado/desarmado MAVLink."""
     if should_arm:
         print("=============================")
-        print("🚀 MAVLINK: ENVIANDO COMANDO ARMADO")
+        print("MAVLINK: ARMADO")
         print("=============================")
+    
+    
     else:
         print("=============================")
-        print("🛑 MAVLINK: ENVIANDO COMANDO DESARMADO")
+        print("MAVLINK: DESARMADO")
         print("=============================")
 
+
 def send_velocity_command(x, y, z):
-    """Simula el envío del comando de velocidad MAVLink."""
     if x == 0 and y == 0 and z == 0:
-        print("MAVLINK: Velocidad: Detenido (0, 0, 0)")
+        print("MAVLINK: IDLE")
     else:
         print(f"MAVLINK: Velocidad: X={x:.2f} | Y={y:.2f} | Z={z:.2f}")
 
 # --- 3. FUNCIONES UTILITY (Mínimas) ---
 
 def standardize_keypoints(pose_landmarks):
-    """Normaliza y estandariza los keypoints centrándolos en el Hombro Derecho."""
+    # estandarizacion de keypoints
     if not pose_landmarks: return None
     origin_point = pose_landmarks.landmark[LANDMARK_INDICES['r_shoulder']]
     l_shoulder = pose_landmarks.landmark[LANDMARK_INDICES['l_shoulder']]
@@ -80,7 +82,7 @@ def standardize_keypoints(pose_landmarks):
     return np.array(normalized_coords, dtype=np.float32)
 
 def get_hand_color(image, pose_landmarks, landmark_index):
-    """Obtiene el color RGB promedio de una pequeña región alrededor del keypoint de la palma."""
+    # color promedio en la palma
     if not pose_landmarks: return None
     point = pose_landmarks.landmark[landmark_index]
     h, w, _ = image.shape
@@ -98,21 +100,21 @@ def get_hand_color(image, pose_landmarks, landmark_index):
     return avg_color_rgb.astype(np.float32)
 
 def color_distance(rgb1, rgb2):
-    """Calcula la distancia euclidiana entre dos colores RGB (para tolerancia)."""
+    # tolerancia
     return math.sqrt(
         (rgb1[0] - rgb2[0])**2 + (rgb1[1] - rgb2[1])**2 + (rgb1[2] - rgb2[2])**2
     )
 
-# --- 4. CARGA DE MODELO (CORREGIDO) ---
+# --- 4. CARGA DE MODELO ---
 
-TFLITE_MODEL_PATH = 'pose_classifier_lite.tflite' # Asume este nombre para tu modelo .tflite
+TFLITE_MODEL_PATH = 'pose_classifier_lite.tflite'
 
 try:
-    # 1. Cargar el LabelEncoder (necesario para mapear el índice de salida a nombre de clase)
+    # 1. LabelEncoder 
     label_encoder = joblib.load('label_encoder2.pkl')
     class_names = list(label_encoder.classes_)
     
-    # 2. Cargar el Intérprete TFLite (CLAVE)
+    # 2. Intérprete TFLite
     interpreter = Interpreter(model_path=TFLITE_MODEL_PATH)
     interpreter.allocate_tensors()
     
@@ -123,12 +125,12 @@ try:
     if input_details[0]['shape'][1] != FEATURE_VECTOR_SIZE:
         raise ValueError("El modelo TFLite espera un tamaño de entrada diferente al configurado.")
     
-    print("✅ Intérprete TFLite y Encoder cargados exitosamente.")
+    print("Intérprete TFLite y Encoder cargados exitosamente.")
 except Exception as e:
-    print(f"❌ ERROR al cargar el modelo o el encoder: {e}")
+    print(f"ERROR al cargar el modelo o el encoder: {e}")
     exit()
 
-# --- 5. BUCLE DE INFERENCIA HEADLESS (CORREGIDO) ---
+# --- 5. BUCLE DE INFERENCIA HEADLESS ---
 
 def run_headless_inference():
     mp_pose = mp.solutions.pose
@@ -151,7 +153,7 @@ def run_headless_inference():
         cap = cv2.VideoCapture(0)
         confidence_threshold = 0.85
         
-        print("\n--- INICIANDO INFERENCIA HEADLESS (CTRL+C para detener) ---")
+        print("\n--- INICIANDO INFERENCIA ---")
 
         while cap.isOpened():
             success, image = cap.read()
@@ -176,41 +178,32 @@ def run_headless_inference():
                     # Preparar la entrada TFLite: [1, 16] float32
                     X_input = normalized_vector.reshape(1, FEATURE_VECTOR_SIZE).astype(np.float32)
                     
-                    # --- INFERENCIA TFLITE (El cambio clave) ---
                     
-                    # 1. Asignar el tensor de entrada
                     interpreter.set_tensor(input_details[0]['index'], X_input)
-                    
-                    # 2. Invocar la inferencia
                     interpreter.invoke()
-                    
-                    # 3. Obtener el tensor de salida (Probabilidades)
                     output_data = interpreter.get_tensor(output_details[0]['index'])
                     
-                    prediction_probs = output_data[0] # El array de probabilidades
+                    prediction_probs = output_data[0]
                     
                     predicted_index = np.argmax(prediction_probs)
                     predicted_confidence = prediction_probs[predicted_index]
                     
-                    # Obtener la clase solo si la confianza es alta
                     if predicted_confidence > confidence_threshold:
                         predicted_class = label_encoder.inverse_transform([predicted_index])[0]
                     
                 
-                # --- LÓGICA DE ARMADO (TOGGLE) Y AUTENTICACIÓN ---
+                # --- LÓGICA DE ARMADO ---
                 
                 if predicted_class == 'armar' and predicted_confidence > confidence_threshold:
                     
                     if arm_toggle_ready and (time.time() - last_arm_disarm_time) > DEBOUNCE_TIME:
                         
                         if is_armed:
-                            # Estaba ARMADO -> Desarmar
                             is_armed = False
                             is_authenticated = False
                             authenticated_color_rgb = None
                             arm_disarm_drone(False)
                         else:
-                            # Estaba DESARMADO -> Armar
                             if current_color_rgb is not None:
                                 authenticated_color_rgb = current_color_rgb
                                 auth_captured_once = True
@@ -228,7 +221,7 @@ def run_headless_inference():
                     arm_toggle_ready = True
                 
                 
-                # --- VERIFICACIÓN DE COLOR (Contínua) ---
+                # --- VERIFICACIÓN DE COLOR ---
 
                 auth_status = is_authenticated
                 if is_armed and auth_captured_once:
@@ -240,7 +233,7 @@ def run_headless_inference():
                         else:
                             is_authenticated = False 
                             
-                    # Reporte de estado de autenticación (solo cuando el estado cambia)
+                    # estado de autenticación 
                     if auth_status != is_authenticated:
                         auth_msg = "EXITOSA" if is_authenticated else f"PERDIDA (Dist: {distance:.1f})"
                         print(f"INFO: Autenticación de Operador: {auth_msg}")
@@ -254,15 +247,12 @@ def run_headless_inference():
                     send_velocity_command(x, y, z)
                     
                 elif is_armed and not is_authenticated:
-                    # Dron armado, pero operador no es el correcto. Ignorar comandos de movimiento.
                     if predicted_class in COMMAND_MAP and predicted_class not in ['idle', 'trans']:
                          print(f"WARN: IGNORANDO COMANDO '{predicted_class.upper()}'. Autenticación de color fallida.")
                     
                 elif is_armed and predicted_class not in COMMAND_MAP and predicted_class != 'armar':
-                    # Si está armado, autenticado, y detecta algo no mapeado, se detiene
                     send_velocity_command(0, 0, 0)
             
-            # Pequeña pausa para evitar sobrecargar la CPU/USB de la cámara
             time.sleep(0.01)
 
     cap.release()
